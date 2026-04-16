@@ -1,0 +1,11 @@
+[project]
+name = "k8s-mutagen-transport"
+version = "0.1.0"
+description = "Sync files to Kubernetes pods with Mutagen - no sshd in the pod"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
