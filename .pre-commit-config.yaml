@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/editorconfig-checker/editorconfig-checker.python
-    rev: 3.6.1
+    rev: 3.11.1
     hooks:
       - id: editorconfig-checker
         exclude: ^uv\.lock$

@@ -9,18 +9,26 @@ Design goals:
 - Log argv so you can see exactly what Mutagen is doing.
 """
 
+import contextlib
 import os
 import shlex
 import signal
 import subprocess
 import sys
-from typing import List, Optional, Tuple
 
-from common import KUBECTL, LOG_PATH, is_k8s_destination, log, parse_host, strip_k8s_host
+from common import (
+    KUBECTL,
+    exit_status,
+    is_k8s_destination,
+    log,
+    parse_host,
+    strip_k8s_host,
+)
 
 SSH = os.environ.get("MUTAGEN_K8S_REAL_SSH", "/usr/bin/ssh")
 
-def parse_ssh_argv(argv: List[str]) -> Tuple[str, str]:
+
+def parse_ssh_argv(argv: list[str]) -> tuple[str, str]:
     """
     Return (destination, remote_cmd).
 
@@ -31,12 +39,12 @@ def parse_ssh_argv(argv: List[str]) -> Tuple[str, str]:
     SSH allows flags before or after the destination; -- terminates option
     scanning and everything after it is the remote command.
 
-    The remote command is returned as a single space-joined string — exactly
+    The remote command is returned as a single space-joined string - exactly
     as the SSH client sends it on the wire. The remote shell re-parses it,
     which is what makes word-splitting of tokens like 'uname -s -m' work.
     """
     option_arg_flags = {"-p", "-F", "-i", "-J", "-l", "-o", "-S"}
-    dest: Optional[str] = None
+    dest: str | None = None
     i = 0
 
     while i < len(argv):
@@ -77,7 +85,8 @@ def parse_ssh_argv(argv: List[str]) -> Tuple[str, str]:
         remote_cmd = shlex.join(remote_tokens)
     return dest, remote_cmd
 
-def parse_destination(dest: str) -> Tuple[Optional[str], str, Optional[str], Optional[str]]:
+
+def parse_destination(dest: str) -> tuple[str | None, str, str | None, str | None]:
     """
     Parse [container@]k8s--pod[.namespace[.context]].
     Returns (container, pod, namespace, context).
@@ -91,7 +100,14 @@ def parse_destination(dest: str) -> Tuple[Optional[str], str, Optional[str], Opt
         raise ValueError("Empty pod name in destination")
     return container, pod, namespace, context
 
-def build_kubectl_exec(container: Optional[str], pod: str, namespace: Optional[str], context: Optional[str], remote_cmd: str) -> List[str]:
+
+def build_kubectl_exec(
+    container: str | None,
+    pod: str,
+    namespace: str | None,
+    context: str | None,
+    remote_cmd: str,
+) -> list[str]:
     cmd = [KUBECTL]
     if context:
         cmd += ["--context", context]
@@ -108,16 +124,17 @@ def build_kubectl_exec(container: Optional[str], pod: str, namespace: Optional[s
         return cmd
 
     # Emulate real SSH server behavior: pass the command as a single string to
-    # sh -c, prepending cd "$HOME". sshd does exactly this — it sends the raw
+    # sh -c, prepending cd "$HOME". sshd does exactly this - it sends the raw
     # command string and the remote shell re-parses it naturally.
     cmd += [pod, "--", "/bin/sh", "-c", f'cd "$HOME" && {remote_cmd}']
     return cmd
+
 
 def main() -> int:
     log(f"argv0={sys.argv[0]} argv={shlex.join(sys.argv[1:])}", verbose=True)
     try:
         dest, remote_cmd = parse_ssh_argv(sys.argv[1:])
-    except Exception as e:
+    except ValueError as e:
         log(f"parse_error={e}")
         print(f"fake-ssh error: {e}", file=sys.stderr)
         return 255
@@ -131,7 +148,7 @@ def main() -> int:
     try:
         container, pod, namespace, context = parse_destination(dest)
         kubectl_cmd = build_kubectl_exec(container, pod, namespace, context, remote_cmd)
-    except Exception as e:
+    except ValueError as e:
         log(f"parse_error={e}")
         print(f"fake-ssh error: {e}", file=sys.stderr)
         return 255
@@ -142,15 +159,14 @@ def main() -> int:
 
     def forward(sig, _frame):
         if proc.poll() is None:
-            try:
+            with contextlib.suppress(OSError):
                 proc.send_signal(sig)
-            except Exception:
-                pass
 
     signal.signal(signal.SIGINT, forward)
     signal.signal(signal.SIGTERM, forward)
 
-    return proc.wait()
+    return exit_status(proc.wait())
+
 
 if __name__ == "__main__":
     sys.exit(main())

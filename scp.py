@@ -12,11 +12,22 @@ import shlex
 import subprocess
 import sys
 import time
-from typing import Optional, Tuple
 
-from common import KUBECTL, is_k8s_destination, log as _log, parse_host, strip_k8s_host
+from common import (
+    KUBECTL,
+    exit_status,
+    is_k8s_destination,
+    parse_host,
+    strip_k8s_host,
+)
+from common import log as _log
 
-HOME_CACHE_PATH = os.environ.get("MUTAGEN_K8S_HOME_CACHE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "mutagen-k8s-home-cache.json"))
+HOME_CACHE_PATH = os.environ.get(
+    "MUTAGEN_K8S_HOME_CACHE",
+    os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "mutagen-k8s-home-cache.json"
+    ),
+)
 HOME_CACHE_TTL = 300  # seconds
 SCP = os.environ.get("MUTAGEN_K8S_REAL_SCP", "/usr/bin/scp")
 
@@ -24,7 +35,10 @@ SCP = os.environ.get("MUTAGEN_K8S_REAL_SCP", "/usr/bin/scp")
 def log(msg: str, verbose: bool = False) -> None:
     _log(f"[scp] {msg}", verbose)
 
-def parse_k8s_destination(dest: str) -> Tuple[Optional[str], str, Optional[str], str, Optional[str]]:
+
+def parse_k8s_destination(
+    dest: str,
+) -> tuple[str | None, str, str | None, str, str | None]:
     """
     Parse [container@]k8s--pod[.namespace[.context]]:remote_path.
     Returns (container, pod, namespace, remote_path, context).
@@ -37,7 +51,8 @@ def parse_k8s_destination(dest: str) -> Tuple[Optional[str], str, Optional[str],
     pod, namespace, context = parse_host(strip_k8s_host(host))
     return container, pod, namespace, remote_path, context
 
-def parse_scp_argv(argv: list) -> Tuple[list, str, str]:
+
+def parse_scp_argv(argv: list) -> tuple[list, str, str]:
     """
     Parse scp argv, returning (flags, source, destination).
     Handles scp [flags] source dest.
@@ -63,11 +78,16 @@ def parse_scp_argv(argv: list) -> Tuple[list, str, str]:
 
     return flags, positional[-2], positional[-1]
 
-def _cache_key(pod: str, namespace: Optional[str], container: Optional[str], context: Optional[str]) -> str:
+
+def _cache_key(
+    pod: str, namespace: str | None, container: str | None, context: str | None
+) -> str:
     return f"{context or '_'}/{namespace or '_'}/{pod}/{container or '_'}"
 
 
-def get_remote_home(pod: str, namespace: Optional[str], container: Optional[str], context: Optional[str]) -> str:
+def get_remote_home(
+    pod: str, namespace: str | None, container: str | None, context: str | None
+) -> str:
     """Return $HOME inside the pod, using a file-backed cache with TTL."""
     key = _cache_key(pod, namespace, container, context)
     now = time.time()
@@ -95,11 +115,13 @@ def get_remote_home(pod: str, namespace: Optional[str], container: Optional[str]
     cmd += [pod, "--", "/bin/sh", "-c", "echo $HOME"]
 
     log(f"resolving home: kubectl={shlex.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     home = result.stdout.strip()
     if not home:
         home = "/root"
-        log(f"home resolution failed (exit={result.returncode}), falling back to {home!r}")
+        log(
+            f"home resolution failed (exit={result.returncode}), falling back to {home!r}"
+        )
     else:
         log(f"resolved home={home!r} for key={key!r}")
 
@@ -108,13 +130,19 @@ def get_remote_home(pod: str, namespace: Optional[str], container: Optional[str]
         os.makedirs(os.path.dirname(HOME_CACHE_PATH), exist_ok=True)
         with open(HOME_CACHE_PATH, "w", encoding="utf-8") as f:
             json.dump(cache, f)
-    except Exception as e:
+    except OSError as e:
         log(f"home_cache_write_error={e}")
 
     return home
 
 
-def resolve_remote_path(remote_path: str, pod: str, namespace: Optional[str], container: Optional[str], context: Optional[str]) -> str:
+def resolve_remote_path(
+    remote_path: str,
+    pod: str,
+    namespace: str | None,
+    container: str | None,
+    context: str | None,
+) -> str:
     """
     Expand relative paths and ~/... to an absolute path, matching real scp/sshd
     behavior where the remote shell starts in $HOME.
@@ -133,8 +161,8 @@ def main() -> int:
     log(f"argv0={sys.argv[0]} argv={shlex.join(sys.argv[1:])}", verbose=True)
 
     try:
-        flags, source, dest = parse_scp_argv(sys.argv[1:])
-    except Exception as e:
+        _flags, source, dest = parse_scp_argv(sys.argv[1:])
+    except (ValueError, IndexError) as e:
         log(f"parse_error={e}")
         print(f"fake-scp error: {e}", file=sys.stderr)
         return 255
@@ -146,7 +174,7 @@ def main() -> int:
     elif is_k8s_destination(source):
         k8s_end, other_end, direction = source, dest, "k8s->local"
     else:
-        log(f"non-k8s, delegating to real scp", verbose=True)
+        log("non-k8s, delegating to real scp", verbose=True)
         os.execv(SCP, [SCP] + sys.argv[1:])
 
     log(f"argv0={sys.argv[0]} argv={shlex.join(sys.argv[1:])}")
@@ -154,7 +182,7 @@ def main() -> int:
 
     try:
         container, pod, namespace, remote_path, context = parse_k8s_destination(k8s_end)
-    except Exception as e:
+    except ValueError as e:
         log(f"parse_error={e}")
         print(f"fake-scp error: {e}", file=sys.stderr)
         return 255
@@ -175,7 +203,8 @@ def main() -> int:
         cmd += [f"{pod}:{remote_path}", other_end]
 
     log(f"kubectl={shlex.join(cmd)}")
-    return subprocess.call(cmd)
+    return exit_status(subprocess.call(cmd))
+
 
 if __name__ == "__main__":
     sys.exit(main())

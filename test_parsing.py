@@ -1,13 +1,13 @@
-#!/usr/bin/env python3
 import pytest
-from common import is_k8s_destination, parse_host, strip_k8s_host
+
+from common import exit_status, is_k8s_destination, parse_host, strip_k8s_host
 from main import parse_destination, parse_ssh_argv
 from scp import parse_k8s_destination, parse_scp_argv
 
+# ---------------------------------------------------------------------------
+# parse_host / strip_k8s_host / exit_status (common)
+# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# parse_host / strip_k8s_host (common)
-# ---------------------------------------------------------------------------
 
 class TestIsK8sDestination:
     def test_k8s_prefix(self):
@@ -34,10 +34,18 @@ class TestParseHost:
         assert parse_host("my-pod.default") == ("my-pod", "default", None)
 
     def test_pod_namespace_context(self):
-        assert parse_host("my-pod.default.my-context") == ("my-pod", "default", "my-context")
+        assert parse_host("my-pod.default.my-context") == (
+            "my-pod",
+            "default",
+            "my-context",
+        )
 
     def test_context_with_dots(self):
-        assert parse_host("my-pod.default.prod.us-east") == ("my-pod", "default", "prod.us-east")
+        assert parse_host("my-pod.default.prod.us-east") == (
+            "my-pod",
+            "default",
+            "prod.us-east",
+        )
 
 
 class TestStripK8sHost:
@@ -54,34 +62,84 @@ class TestStripK8sHost:
         assert strip_k8s_host("my-pod") == "my-pod"
 
 
+class TestExitStatus:
+    def test_success(self):
+        assert exit_status(0) == 0
+
+    def test_regular_failure(self):
+        assert exit_status(7) == 7
+
+    def test_killed_by_sigterm(self):
+        assert exit_status(-15) == 143
+
+    def test_killed_by_sigkill(self):
+        assert exit_status(-9) == 137
+
+
 # ---------------------------------------------------------------------------
 # parse_destination (ssh)
 # ---------------------------------------------------------------------------
+
 
 class TestParseDestination:
     def test_pod_only(self):
         assert parse_destination("k8s--my-pod") == (None, "my-pod", None, None)
 
     def test_pod_and_namespace(self):
-        assert parse_destination("k8s--my-pod.default") == (None, "my-pod", "default", None)
+        assert parse_destination("k8s--my-pod.default") == (
+            None,
+            "my-pod",
+            "default",
+            None,
+        )
 
     def test_pod_namespace_context(self):
-        assert parse_destination("k8s--my-pod.default.my-context") == (None, "my-pod", "default", "my-context")
+        assert parse_destination("k8s--my-pod.default.my-context") == (
+            None,
+            "my-pod",
+            "default",
+            "my-context",
+        )
 
     def test_context_with_dots(self):
-        assert parse_destination("k8s--my-pod.default.prod.us-east") == (None, "my-pod", "default", "prod.us-east")
+        assert parse_destination("k8s--my-pod.default.prod.us-east") == (
+            None,
+            "my-pod",
+            "default",
+            "prod.us-east",
+        )
 
     def test_container(self):
-        assert parse_destination("app@k8s--my-pod.default") == ("app", "my-pod", "default", None)
+        assert parse_destination("app@k8s--my-pod.default") == (
+            "app",
+            "my-pod",
+            "default",
+            None,
+        )
 
     def test_container_with_context(self):
-        assert parse_destination("app@k8s--my-pod.default.my-context") == ("app", "my-pod", "default", "my-context")
+        assert parse_destination("app@k8s--my-pod.default.my-context") == (
+            "app",
+            "my-pod",
+            "default",
+            "my-context",
+        )
 
     def test_ssh_url_prefix(self):
-        assert parse_destination("ssh://my-pod.default") == (None, "my-pod", "default", None)
+        assert parse_destination("ssh://my-pod.default") == (
+            None,
+            "my-pod",
+            "default",
+            None,
+        )
 
     def test_port_stripped(self):
-        assert parse_destination("k8s--my-pod.default:22") == (None, "my-pod", "default", None)
+        assert parse_destination("k8s--my-pod.default:22") == (
+            None,
+            "my-pod",
+            "default",
+            None,
+        )
 
     def test_empty_pod_raises(self):
         with pytest.raises(ValueError, match="Empty pod name"):
@@ -92,6 +150,7 @@ class TestParseDestination:
 # parse_ssh_argv
 # ---------------------------------------------------------------------------
 
+
 class TestParseSshArgv:
     def test_simple(self):
         dest, cmd = parse_ssh_argv(["k8s--my-pod", "uname -s"])
@@ -99,13 +158,16 @@ class TestParseSshArgv:
         assert cmd == "uname -s"
 
     def test_flags_before_dest(self):
-        dest, cmd = parse_ssh_argv(["-o", "StrictHostKeyChecking=no", "-T", "k8s--my-pod", "echo hi"])
+        dest, cmd = parse_ssh_argv(
+            ["-o", "StrictHostKeyChecking=no", "-T", "k8s--my-pod", "echo hi"]
+        )
         assert dest == "k8s--my-pod"
         assert cmd == "echo hi"
 
     def test_inline_o_flag(self):
         dest, cmd = parse_ssh_argv(["-oStrictHostKeyChecking=no", "k8s--my-pod", "ls"])
         assert dest == "k8s--my-pod"
+        assert cmd == "ls"
 
     def test_no_command(self):
         dest, cmd = parse_ssh_argv(["k8s--my-pod"])
@@ -121,30 +183,72 @@ class TestParseSshArgv:
 # parse_k8s_destination (scp)
 # ---------------------------------------------------------------------------
 
+
 class TestParseK8sDestination:
     def test_pod_only(self):
-        assert parse_k8s_destination("k8s--my-pod:/data") == (None, "my-pod", None, "/data", None)
+        assert parse_k8s_destination("k8s--my-pod:/data") == (
+            None,
+            "my-pod",
+            None,
+            "/data",
+            None,
+        )
 
     def test_pod_and_namespace(self):
-        assert parse_k8s_destination("k8s--my-pod.default:/data") == (None, "my-pod", "default", "/data", None)
+        assert parse_k8s_destination("k8s--my-pod.default:/data") == (
+            None,
+            "my-pod",
+            "default",
+            "/data",
+            None,
+        )
 
     def test_pod_namespace_context(self):
-        assert parse_k8s_destination("k8s--my-pod.default.my-context:/data") == (None, "my-pod", "default", "/data", "my-context")
+        assert parse_k8s_destination("k8s--my-pod.default.my-context:/data") == (
+            None,
+            "my-pod",
+            "default",
+            "/data",
+            "my-context",
+        )
 
     def test_context_with_dots(self):
-        assert parse_k8s_destination("k8s--my-pod.default.prod.us-east:/data") == (None, "my-pod", "default", "/data", "prod.us-east")
+        assert parse_k8s_destination("k8s--my-pod.default.prod.us-east:/data") == (
+            None,
+            "my-pod",
+            "default",
+            "/data",
+            "prod.us-east",
+        )
 
     def test_container(self):
-        assert parse_k8s_destination("app@k8s--my-pod.default:/data") == ("app", "my-pod", "default", "/data", None)
+        assert parse_k8s_destination("app@k8s--my-pod.default:/data") == (
+            "app",
+            "my-pod",
+            "default",
+            "/data",
+            None,
+        )
 
     def test_container_with_context(self):
-        assert parse_k8s_destination("app@k8s--my-pod.default.my-context:/data") == ("app", "my-pod", "default", "/data", "my-context")
+        assert parse_k8s_destination("app@k8s--my-pod.default.my-context:/data") == (
+            "app",
+            "my-pod",
+            "default",
+            "/data",
+            "my-context",
+        )
 
     def test_remote_path_with_colons(self):
         # Only the first colon separates host from path
-        container, pod, ns, path, ctx = parse_k8s_destination("k8s--my-pod:/some:weird:path")
+        container, pod, ns, path, ctx = parse_k8s_destination(
+            "k8s--my-pod:/some:weird:path"
+        )
+        assert container is None
         assert pod == "my-pod"
+        assert ns is None
         assert path == "/some:weird:path"
+        assert ctx is None
 
     def test_relative_remote_path(self):
         _, _, _, path, _ = parse_k8s_destination("k8s--my-pod:~/project")
@@ -155,6 +259,7 @@ class TestParseK8sDestination:
 # parse_scp_argv
 # ---------------------------------------------------------------------------
 
+
 class TestParseScpArgv:
     def test_simple_local_to_remote(self):
         flags, src, dst = parse_scp_argv(["/local/file", "k8s--my-pod:/remote"])
@@ -163,7 +268,9 @@ class TestParseScpArgv:
         assert dst == "k8s--my-pod:/remote"
 
     def test_flags(self):
-        flags, src, dst = parse_scp_argv(["-r", "-P", "22", "/local", "k8s--my-pod:/remote"])
+        flags, src, dst = parse_scp_argv(
+            ["-r", "-P", "22", "/local", "k8s--my-pod:/remote"]
+        )
         assert "-r" in flags
         assert "-P" in flags
         assert "22" in flags
